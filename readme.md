@@ -1,3 +1,4 @@
+# HA supply network model
 The current version of the model is simplified in the following ways:
   - only single product considered (K == 1)
 
@@ -9,4 +10,4 @@ The current version of the model is simplified in the following ways:
   - timeframe for warehouse reaction is equal to 1 (tau_w == 1)
     this is probably the easiest point to change
   
-  - prediction horizont Omega == 1
+  - prediction horizon Omega == 1
