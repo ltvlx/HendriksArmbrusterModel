@@ -156,7 +156,7 @@ class HendriksArmbrusterSimulator:
         # resulting variables:
         c0 = 0
         vec_c = []
-        mtr_Q = np.zeros((self.n_edges, self.n_edges), dtype=int)
+        mtr_Q = np.zeros((self.n_edges, self.n_edges), dtype=float)
 
         # for i in range(self.n_nodes):
         #     for j in range(i+1, self.n_nodes):
@@ -184,7 +184,11 @@ class HendriksArmbrusterSimulator:
             for u in routes_i:
                 for v in routes_i:
                     # Quadratic part from backlog costs (b(t) equations)
-                    mtr_Q[u][v] = self.B_costs
+                    if u != v:
+                        mtr_Q[u][v] = 0.5 * self.B_costs
+                    else:
+                        mtr_Q[u][v] = self.B_costs
+
 
         for w in self.warehouses:
             c0 += self.h_costs[w-S] * self.y_t.at[t][w-S]
