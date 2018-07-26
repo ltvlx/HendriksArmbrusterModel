@@ -29,7 +29,8 @@ class HendriksArmbrusterSimulator:
     # Current timestep
     t = 0
     
-    # Time series of delivery volumes, backlog, warehouse inventories, and demand
+    # Time series of generated supply, delivery volumes, backlog, warehouse inventories, and demand
+    S_t = []
     x_t = []
     b_t = []
     y_t = []
@@ -73,7 +74,7 @@ class HendriksArmbrusterSimulator:
             finp.readline() # h inventory keeping costs; [0, ..., W-1]
             self.h_costs = list(map(float, finp.readline().split()))
 
-
+        self.S_t = pd.Series([[0.0] * self.S])
         self.x_t = pd.Series([[0.0] * self.n_edges])
         self.y_t = pd.Series([[0.0] * self.W])
         self.b_t = pd.Series([[0.0] * self.D])
@@ -100,9 +101,13 @@ class HendriksArmbrusterSimulator:
         _x = pd.Series([[4.5, 1.0, 1.9, 2.1, 0.5, 0.9, 2.3, 2.7, 1.4]])
         self.x_t = self.x_t.append(_x, ignore_index=True)
 
-        self.y_t = self.y_t.append(pd.Series([[9.4]]), ignore_index=True)
-        self.b_t = self.b_t.append(pd.Series([[1.1, 2.1, 3.1]]), ignore_index=True)
+        self.S_t = self.S_t.append(pd.Series([[3.5, 5.2, 5.5]]), ignore_index=True)
         self.D_t = self.D_t.append(pd.Series([[6.5, 3.7, 4.0]]), ignore_index=True)
+        # Important! These two things should be recalculated after the MIQP solution
+        # self.y_t = self.y_t.append(pd.Series([[9.4]]), ignore_index=True)
+        # self.b_t = self.b_t.append(pd.Series([[1.1, 2.1, 3.1]]), ignore_index=True)
+        self.y_t = self.y_t.append(pd.Series([[0.0]]), ignore_index=True)
+        self.b_t = self.b_t.append(pd.Series([[0.0, 0.0, 0.0]]), ignore_index=True)
 
         """
             # print(self.x_t.at[1])
@@ -117,10 +122,10 @@ class HendriksArmbrusterSimulator:
         """
 
         mtr_Q, vec_c, c0 = self.make_QCc()
+        const_S, const_W = self.make_constr()
 
         from solver import solve_MIQP
-        x, val = solve_MIQP(mtr_Q, vec_c, c0)
-
+        x, val = solve_MIQP(mtr_Q, vec_c, c0, const_S, const_W)
         print(mtr_Q)
         print(x, val)
 
@@ -151,7 +156,6 @@ class HendriksArmbrusterSimulator:
         t = self.t
         S = self.S
         W = self.W
-
 
         # resulting variables:
         c0 = 0
@@ -189,8 +193,8 @@ class HendriksArmbrusterSimulator:
                     else:
                         mtr_Q[u][v] = self.B_costs
 
-
         for w in self.warehouses:
+            # Insert y_tau here
             c0 += self.h_costs[w-S] * self.y_t.at[t][w-S]
             for i in self.suppliers:
                 if self.mtr_adj[w][i] != 0:
@@ -199,12 +203,43 @@ class HendriksArmbrusterSimulator:
                     c0 += self.h_costs[w-S] * self.x_t.at[t][k]
 
             for j in self.distributors:
-                if self.mtr_adj[w][j] != 0:
+                if self.mtr_adj[w, j] != 0:
                     a = (w, j)
                     k = self.x_node_pairs.index(a)
                     vec_c[k] -= self.h_costs[w-S]
 
-        return mtr_Q, vec_c, c0 # np.matrix(vec_c).transpose()
+        return mtr_Q, vec_c, c0
+
+
+    def make_constr(self):
+        # All produced supply must be shipped
+        mtr_S = np.zeros((self.S, self.n_edges))
+        k = 0
+        for i in range(self.S):
+            for j in range(self.S, self.n_nodes):
+                if self.mtr_adj[i, j] > 0:
+                    mtr_S[i, k] = 1
+                    k += 1
+        vec_S = self.S_t.at[self.t]
+
+        # Warehouse inventories cannot be negative
+        mtr_W = np.zeros((self.W, self.n_edges))
+        for i in range(self.W):
+            for j in range(self.S + self.W, self.n_nodes):
+                if self.mtr_adj[self.S+i, j] > 0:
+                    mtr_W[i, k] = 1
+                    k += 1
+        vec_W = [0.0]*self.W
+        for i in range(self.W):
+            # Insert y_tau here
+            vec_W[i] += self.y_t.at[self.t-1][i]
+            for j in range(self.S + self.W, self.n_nodes):
+                if self.mtr_adj[self.S+i, j] > 0:
+                    a = (self.S+i, j)
+                    k = self.x_node_pairs.index(a)
+                    vec_W[i] += self.x_t.at[self.t-1][k]
+
+        return (mtr_S, vec_S), (mtr_W, vec_W)
 
 
     def draw_network(self):
@@ -236,6 +271,4 @@ class HendriksArmbrusterSimulator:
 A = HendriksArmbrusterSimulator()
 A.first_iteration_temp()
 # A.draw_network()
-# mtr_Q, vec_c, c0 = A.make_QCc()
 
-# print("Output Q, C, and c0:\n", mtr_Q, "\n", vec_c, "\n", c0)
