@@ -2,6 +2,7 @@ import codecs
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from solver import solve_MIQP
 
 
 class HendriksArmbrusterSimulator:
@@ -96,38 +97,45 @@ class HendriksArmbrusterSimulator:
 
 
     def first_iteration_temp(self):
-        # _x = pd.Series([[i for i in range(self.n_edges)]])
         self.t += 1
-        _x = pd.Series([[4.5, 1.0, 1.9, 2.1, 0.5, 0.9, 2.3, 2.7, 1.4]])
-        self.x_t = self.x_t.append(_x, ignore_index=True)
-
-        self.S_t = self.S_t.append(pd.Series([[3.5, 5.2, 5.5]]), ignore_index=True)
+        self.S_t = self.S_t.append(pd.Series([[8.5, 5.2, 5.5]]), ignore_index=True)
         self.D_t = self.D_t.append(pd.Series([[6.5, 3.7, 4.0]]), ignore_index=True)
-        # Important! These two things should be recalculated after the MIQP solution
-        # self.y_t = self.y_t.append(pd.Series([[9.4]]), ignore_index=True)
-        # self.b_t = self.b_t.append(pd.Series([[1.1, 2.1, 3.1]]), ignore_index=True)
-        self.y_t = self.y_t.append(pd.Series([[0.0]]), ignore_index=True)
-        self.b_t = self.b_t.append(pd.Series([[0.0, 0.0, 0.0]]), ignore_index=True)
-
-        """
-            # print(self.x_t.at[1])
-            # print("x_t vector:")
-            # print(self.x_t)
-            # print("y_t vector:")
-            # print(self.y_t)
-            # print("b_t vector:")
-            # print(self.b_t)
-            # print("D_t vector:")
-            # print(self.D_t)
-        """
 
         mtr_Q, vec_c, c0 = self.make_QCc()
         const_S, const_W = self.make_constr()
 
-        from solver import solve_MIQP
         x, val = solve_MIQP(mtr_Q, vec_c, c0, const_S, const_W)
-        print(mtr_Q)
+        self.x_t = self.x_t.append(pd.Series([list(x)]), ignore_index=True)
+
         print(x, val)
+
+        # Recalculate backlog and warehouse inventories
+        _y = list(self.y_t.at[self.t-1])
+        for w in range(self.S, self.S+self.W):
+            for i in range(self.S):
+                if self.mtr_adj[i, w] > 0:
+                    a = (i, w)
+                    k = self.x_node_pairs.index(a)
+                    # Insert y_tau here ## y(t-tau+1)
+                    _y[w-self.S] += self.x_t.at[self.t][k]
+            for j in range(self.S+self.W, self.n_nodes):
+                if self.mtr_adj[w, j] > 0:
+                    a = (w, j)
+                    k = self.x_node_pairs.index(a)
+                    _y[w-self.S] -= self.x_t.at[self.t][k]
+        self.y_t = self.y_t.append(pd.Series([_y]), ignore_index=True)
+
+        _b = list(self.b_t.at[self.t-1])
+        for j in range(self.S+self.W, self.S+self.W+ self.D):
+            _b[j-self.S-self.W] += self.D_t.at[self.t][j-self.S-self.W]
+            for i in range(self.S+self.W):
+                if self.mtr_adj[i, j] > 0:
+                    a = (i, j)
+                    k = self.x_node_pairs.index(a)
+                    _b[j-self.S-self.W] -= self.x_t.at[self.t][k]
+        self.b_t = self.b_t.append(pd.Series([_b]), ignore_index=True)
+
+
 
 
     def make_QCc(self):
@@ -170,7 +178,7 @@ class HendriksArmbrusterSimulator:
             vec_c.append(c_ij * self.V_costs)
 
         for i in self.distributors:
-            c0 += self.B_costs * ((self.b_t.at[t][i - S - W] + self.D_t.at[t][i - S - W])**2)
+            c0 += self.B_costs * ((self.b_t.at[t-1][i - S - W] + self.D_t.at[t][i - S - W])**2)
             sup_nodes = []
             for j in range(self.n_nodes):
                 w = self.mtr_adj[i][j]
@@ -183,7 +191,7 @@ class HendriksArmbrusterSimulator:
                 k = self.x_node_pairs.index(a)
                 routes_i.append(k)
                 # Linear part from backlog costs (b(t) equations)
-                vec_c[k] -= self.B_costs * (self.b_t.at[t][i-S-W] + self.D_t.at[t][i-S-W])
+                vec_c[k] -= self.B_costs * (self.b_t.at[t-1][i-S-W] + self.D_t.at[t][i-S-W])
             
             for u in routes_i:
                 for v in routes_i:
@@ -195,12 +203,12 @@ class HendriksArmbrusterSimulator:
 
         for w in self.warehouses:
             # Insert y_tau here
-            c0 += self.h_costs[w-S] * self.y_t.at[t][w-S]
+            c0 += self.h_costs[w-S] * self.y_t.at[t-1][w-S]
             for i in self.suppliers:
                 if self.mtr_adj[w][i] != 0:
                     a = (i, w)
                     k = self.x_node_pairs.index(a)
-                    c0 += self.h_costs[w-S] * self.x_t.at[t][k]
+                    c0 += self.h_costs[w-S] * self.x_t.at[t-1][k]
 
             for j in self.distributors:
                 if self.mtr_adj[w, j] != 0:
@@ -267,8 +275,45 @@ class HendriksArmbrusterSimulator:
         plt.axis('off')
         plt.show()
 
+
+    def draw_current_timestep(self):
+        import networkx as nx
+        G = nx.from_numpy_matrix(self.mtr_adj)
+        elables = {}
+        width = [G[u][v]['weight'] / 5. for u,v in G.edges()]
+        for (u,v) in G.edges():
+            k = self.x_node_pairs.index((u,v))
+            elables[(u,v)] = "%4.2f"%(self.x_t.at[self.t][k])
+
+        node_labels = {}
+        for i in range(self.S):
+            node_labels[i] = str(self.S_t.at[self.t][i])
+        for w in range(self.S, self.S+self.W):
+            node_labels[w] = str(self.y_t.at[self.t-1][w-self.S]) + "\n%4.2f"%self.y_t.at[self.t][w-self.S]
+        for j in range(self.S+self.W, self.S+self.W+self.D):
+            node_labels[j] = "[%3.1f]\n%4.2f\n%4.2f"%(self.D_t.at[self.t][j-self.S-self.W], 
+                self.b_t.at[self.t-1][j-self.S-self.W], self.b_t.at[self.t][j-self.S-self.W])
+
+
+        pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [0.0, -2.0], 3: [1.0, -0.5], 4: [2.0,  0.0], 5: [2.0, -1.0], 6: [2.0, -2.0]}
+        # pos = nx.spring_layout(G, weight='weight')
+
+        suppliers = [i for i in range(self.S)]
+        warehouses = [i for i in range(self.S, self.S + self.W)]
+        distributors = [i for i in range(self.S + self.W, self.S + self.W + self.D)]
+
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=1000, node_color='C0')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=1000, node_color='C1')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=1000, node_color='C2')
+
+        nx.draw_networkx_edges(G, pos=pos, node_color='C0', width=width)
+        nx.draw_networkx_labels(G, pos=pos, labels=node_labels)
+        nx.draw_networkx_edge_labels(G, pos=pos, edge_labels=elables, label_pos=0.8)
+        plt.axis('off')
+        plt.show()
             
 A = HendriksArmbrusterSimulator()
 A.first_iteration_temp()
+A.draw_current_timestep()
 # A.draw_network()
 
