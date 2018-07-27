@@ -96,20 +96,40 @@ class HendriksArmbrusterSimulator:
         return res
 
 
-    def first_iteration_temp(self):
+    def simulate(self, n_iter):
+        print("Starting simulation process.")
+        for _ in range(n_iter):
+            self.make_iteration()
+        print("Simulation done.")
+
+
+
+    def make_iteration(self):
         self.t += 1
-        self.S_t = self.S_t.append(pd.Series([[8.5, 5.2, 5.5]]), ignore_index=True)
-        self.D_t = self.D_t.append(pd.Series([[6.5, 3.7, 4.0]]), ignore_index=True)
+        self.__generate_supply_demand()
+        mtr_Q, vec_c, c0 = self.__make_QCc()
+        const_S, const_W = self.__make_constr()
 
-        mtr_Q, vec_c, c0 = self.make_QCc()
-        const_S, const_W = self.make_constr()
-
+        print("t = %d"%self.t, end=', ')
         x, val = solve_MIQP(mtr_Q, vec_c, c0, const_S, const_W)
         self.x_t = self.x_t.append(pd.Series([list(x)]), ignore_index=True)
+        self.__update_y_b()
+        print("Cost = %6.2f"%val)
 
-        print(x, val)
 
-        # Recalculate backlog and warehouse inventories
+    def __generate_supply_demand(self):
+        _D, _S = [], []
+        mu, sigma = 10.0, 3.0
+        for _ in range(self.D):
+            _D.append(max(np.random.normal(mu, sigma), 0.0))
+        for _ in range(self.S):
+            _S.append(max(np.random.normal(mu, sigma), 0.0))
+        self.S_t = self.S_t.append(pd.Series([_S]), ignore_index=True)
+        self.D_t = self.D_t.append(pd.Series([_D]), ignore_index=True)
+
+
+    def __update_y_b(self):
+        # Recalculate backlog and warehouse inventories after optimization
         _y = list(self.y_t.at[self.t-1])
         for w in range(self.S, self.S+self.W):
             for i in range(self.S):
@@ -136,9 +156,7 @@ class HendriksArmbrusterSimulator:
         self.b_t = self.b_t.append(pd.Series([_b]), ignore_index=True)
 
 
-
-
-    def make_QCc(self):
+    def __make_QCc(self):
         """
             The goal of current subroutine is to create 
             matrix Q, vector C, and constant term c0 
@@ -170,8 +188,6 @@ class HendriksArmbrusterSimulator:
         vec_c = []
         mtr_Q = np.zeros((self.n_edges, self.n_edges), dtype=float)
 
-        # for i in range(self.n_nodes):
-        #     for j in range(i+1, self.n_nodes):
         for i, j in self.x_node_pairs:
             c_ij = self.mtr_adj[i][j]
             # Linear part from transportation costs
@@ -219,7 +235,7 @@ class HendriksArmbrusterSimulator:
         return mtr_Q, vec_c, c0
 
 
-    def make_constr(self):
+    def __make_constr(self):
         # All produced supply must be shipped
         mtr_S = np.zeros((self.S, self.n_edges))
         k = 0
@@ -248,6 +264,73 @@ class HendriksArmbrusterSimulator:
                     vec_W[i] += self.x_t.at[self.t-1][k]
 
         return (mtr_S, vec_S), (mtr_W, vec_W)
+
+    ###############################################################################
+    #   Printing / Writing
+
+    def write_history(self):
+        self.__write_deliveries()
+        self.__write_supply_demand()
+        self.__write_inventory_backlog()
+
+
+    def __write_deliveries(self):
+        with codecs.open('history_xt.dat', 'w') as fout:
+            fout.write("Variables = t, ")
+            for i in range(self.n_edges):
+                fout.write("x_%d_%d"%(self.x_node_pairs[i]))
+                if i+1 < self.n_edges:
+                    fout.write(", ")
+                else:
+                    fout.write("\n")
+
+            for t in range(self.t):
+                fout.write("%5d "%t)
+                for i in range(self.n_edges):
+                    fout.write("%7.2f "%self.x_t.at[t][i])
+                fout.write("\n")
+
+
+    def __write_supply_demand(self):
+        with codecs.open('history_St_Dt.dat', 'w') as fout:
+            fout.write("Variables = t, ")
+            for i in range(self.S):
+                fout.write("S_%d, "%i)
+            for j in range(self.D):
+                fout.write("D_%d"%j)
+                if j+1 < self.D:
+                    fout.write(", ")
+                else:
+                    fout.write("\n")
+
+            for t in range(self.t):
+                fout.write("%5d "%t)
+                for i in range(self.S):
+                    fout.write("%7.2f "%self.S_t.at[t][i])
+                for j in range(self.D):
+                    fout.write("%7.2f "%self.D_t.at[t][j])
+                fout.write("\n")                
+
+    def __write_inventory_backlog(self):
+        with codecs.open('history_bt_yt.dat', 'w') as fout:
+            fout.write("Variables = t, ")
+            for w in range(self.W):
+                fout.write("y_%d, "%w)
+            for j in range(self.D):
+                fout.write("b_%d"%j)
+                if j+1 < self.D:
+                    fout.write(", ")
+                else:
+                    fout.write("\n")
+
+            for t in range(self.t):
+                fout.write("%5d "%t)
+                for w in range(self.W):
+                    fout.write("%7.2f "%self.y_t.at[t][w])
+                for j in range(self.D):
+                    fout.write("%7.2f "%self.b_t.at[t][j])
+                fout.write("\n")       
+
 
 
     def draw_network(self):
@@ -287,9 +370,9 @@ class HendriksArmbrusterSimulator:
 
         node_labels = {}
         for i in range(self.S):
-            node_labels[i] = str(self.S_t.at[self.t][i])
+            node_labels[i] = "%4.2f"%self.S_t.at[self.t][i]
         for w in range(self.S, self.S+self.W):
-            node_labels[w] = str(self.y_t.at[self.t-1][w-self.S]) + "\n%4.2f"%self.y_t.at[self.t][w-self.S]
+            node_labels[w] = "%4.2f\n%4.2f"%(self.y_t.at[self.t-1][w-self.S], self.y_t.at[self.t][w-self.S])
         for j in range(self.S+self.W, self.S+self.W+self.D):
             node_labels[j] = "[%3.1f]\n%4.2f\n%4.2f"%(self.D_t.at[self.t][j-self.S-self.W], 
                 self.b_t.at[self.t-1][j-self.S-self.W], self.b_t.at[self.t][j-self.S-self.W])
@@ -302,18 +385,21 @@ class HendriksArmbrusterSimulator:
         warehouses = [i for i in range(self.S, self.S + self.W)]
         distributors = [i for i in range(self.S + self.W, self.S + self.W + self.D)]
 
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=1000, node_color='C0')
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=1000, node_color='C1')
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=1000, node_color='C2')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=2000, node_color='C0')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=2000, node_color='C1')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=2000, node_color='C2')
 
         nx.draw_networkx_edges(G, pos=pos, node_color='C0', width=width)
         nx.draw_networkx_labels(G, pos=pos, labels=node_labels)
-        nx.draw_networkx_edge_labels(G, pos=pos, edge_labels=elables, label_pos=0.8)
+        nx.draw_networkx_edge_labels(G, pos=pos, edge_labels=elables, label_pos=0.75)
         plt.axis('off')
         plt.show()
             
-A = HendriksArmbrusterSimulator()
-A.first_iteration_temp()
-A.draw_current_timestep()
-# A.draw_network()
 
+np.random.seed(1)
+A = HendriksArmbrusterSimulator()
+A.simulate(5)
+# A.draw_current_timestep()
+# A.draw_network()
+A.write_history()
+print(A.y_t)
