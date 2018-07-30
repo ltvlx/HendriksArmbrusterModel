@@ -29,7 +29,7 @@ class HendriksArmbrusterSimulator:
 
     # Current timestep
     t = 0
-    
+
     # Time series of generated supply, delivery volumes, backlog, warehouse inventories, and demand
     S_t = []
     x_t = []
@@ -37,7 +37,7 @@ class HendriksArmbrusterSimulator:
     y_t = []
     D_t = []
 
-        
+
     def __init__(self):
         """
             During the initialization, setup is read from 'setup.txt' file.
@@ -58,8 +58,8 @@ class HendriksArmbrusterSimulator:
             adj = []
             for _ in range(self.S + self.W + self.D):
                 adj.append(list(map(int, finp.readline().split())))
-
             adj = np.array(adj, dtype=int)
+            assert(adj.shape == (self.S + self.W + self.D, self.S + self.W + self.D))
             assert((adj.transpose() == adj).all())
             self.mtr_adj = adj
 
@@ -80,11 +80,6 @@ class HendriksArmbrusterSimulator:
         self.y_t = pd.Series([[0.0] * self.W])
         self.b_t = pd.Series([[0.0] * self.D])
         self.D_t = pd.Series([[0.0] * self.D])
-
-        # print(self.mtr_adj)
-        # print(self.n_nodes, self.n_edges)
-        # print(self.x_node_pairs)
-        # print(self.V_costs, self.B_costs, self.h_costs)
         
 
     def __get_edges_number(self):
@@ -101,7 +96,6 @@ class HendriksArmbrusterSimulator:
         for _ in range(n_iter):
             self.make_iteration()
         print("Simulation done.")
-
 
 
     def make_iteration(self):
@@ -137,7 +131,7 @@ class HendriksArmbrusterSimulator:
                     a = (i, w)
                     k = self.x_node_pairs.index(a)
                     # Insert y_tau here ## y(t-tau+1)
-                    _y[w-self.S] += self.x_t.at[self.t][k]
+                    _y[w-self.S] += self.x_t.at[self.t-1][k]
             for j in range(self.S+self.W, self.n_nodes):
                 if self.mtr_adj[w, j] > 0:
                     a = (w, j)
@@ -207,15 +201,12 @@ class HendriksArmbrusterSimulator:
                 k = self.x_node_pairs.index(a)
                 routes_i.append(k)
                 # Linear part from backlog costs (b(t) equations)
-                vec_c[k] -= self.B_costs * (self.b_t.at[t-1][i-S-W] + self.D_t.at[t][i-S-W])
+                vec_c[k] -= 2 * self.B_costs * (self.b_t.at[t-1][i-S-W] + self.D_t.at[t][i-S-W])
             
             for u in routes_i:
                 for v in routes_i:
                     # Quadratic part from backlog costs (b(t) equations)
-                    if u != v:
-                        mtr_Q[u][v] = 0.5 * self.B_costs
-                    else:
-                        mtr_Q[u][v] = self.B_costs
+                    mtr_Q[u][v] = self.B_costs
 
         for w in self.warehouses:
             # Insert y_tau here
@@ -254,15 +245,14 @@ class HendriksArmbrusterSimulator:
                     mtr_W[i, k] = 1
                     k += 1
         vec_W = [0.0]*self.W
-        for i in range(self.W):
+        for w in range(self.W):
             # Insert y_tau here
-            vec_W[i] += self.y_t.at[self.t-1][i]
-            for j in range(self.S + self.W, self.n_nodes):
-                if self.mtr_adj[self.S+i, j] > 0:
-                    a = (self.S+i, j)
+            vec_W[w] += self.y_t.at[self.t-1][w]
+            for i in range(self.S):
+                if self.mtr_adj[i, self.S+w] > 0:
+                    a = (i, self.S+w)
                     k = self.x_node_pairs.index(a)
-                    vec_W[i] += self.x_t.at[self.t-1][k]
-
+                    vec_W[w] += self.x_t.at[self.t-1][k]
         return (mtr_S, vec_S), (mtr_W, vec_W)
 
     ###############################################################################
@@ -284,7 +274,7 @@ class HendriksArmbrusterSimulator:
                 else:
                     fout.write("\n")
 
-            for t in range(self.t):
+            for t in range(self.t+1):
                 fout.write("%5d "%t)
                 for i in range(self.n_edges):
                     fout.write("%7.2f "%self.x_t.at[t][i])
@@ -303,13 +293,14 @@ class HendriksArmbrusterSimulator:
                 else:
                     fout.write("\n")
 
-            for t in range(self.t):
+            for t in range(self.t+1):
                 fout.write("%5d "%t)
                 for i in range(self.S):
                     fout.write("%7.2f "%self.S_t.at[t][i])
                 for j in range(self.D):
                     fout.write("%7.2f "%self.D_t.at[t][j])
                 fout.write("\n")                
+
 
     def __write_inventory_backlog(self):
         with codecs.open('history_bt_yt.dat', 'w') as fout:
@@ -323,14 +314,13 @@ class HendriksArmbrusterSimulator:
                 else:
                     fout.write("\n")
 
-            for t in range(self.t):
+            for t in range(self.t+1):
                 fout.write("%5d "%t)
                 for w in range(self.W):
                     fout.write("%7.2f "%self.y_t.at[t][w])
                 for j in range(self.D):
                     fout.write("%7.2f "%self.b_t.at[t][j])
                 fout.write("\n")       
-
 
 
     def draw_network(self):
@@ -341,7 +331,8 @@ class HendriksArmbrusterSimulator:
         for (u,v) in G.edges():
             elables[(u,v)] = str(G[u][v]['weight']) # "%d  (%d,%d)"%(G[u][v]['weight'], u, v)
         
-        pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [0.0, -2.0], 3: [1.0, -0.5], 4: [2.0,  0.0], 5: [2.0, -1.0], 6: [2.0, -2.0]}
+        pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [1.0, -0.5], 3: [2.0, 0.0], 4: [2.0,  -1.0]}
+        # pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [0.0, -2.0], 3: [1.0, -0.5], 4: [2.0,  0.0], 5: [2.0, -1.0], 6: [2.0, -2.0]}
         # pos = nx.spring_layout(G, weight='weight')
 
         suppliers = [i for i in range(self.S)]
@@ -377,7 +368,8 @@ class HendriksArmbrusterSimulator:
             node_labels[j] = "[%3.1f]\n%4.2f\n%4.2f"%(self.D_t.at[self.t][j-self.S-self.W], 
                 self.b_t.at[self.t-1][j-self.S-self.W], self.b_t.at[self.t][j-self.S-self.W])
 
-
+        # pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [1.0, -0.5], 3: [2.0, 0.0], 4: [2.0,  -1.0]}
+        # pos = {0: [0.0,  0.0], 1: [1.0, 0.50], 2: [2.0, 0.0]}
         pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [0.0, -2.0], 3: [1.0, -0.5], 4: [2.0,  0.0], 5: [2.0, -1.0], 6: [2.0, -2.0]}
         # pos = nx.spring_layout(G, weight='weight')
 
@@ -402,4 +394,3 @@ A.simulate(5)
 # A.draw_current_timestep()
 # A.draw_network()
 A.write_history()
-print(A.y_t)
