@@ -331,17 +331,15 @@ class HendriksArmbrusterSimulator:
         for (u,v) in G.edges():
             elables[(u,v)] = str(G[u][v]['weight']) # "%d  (%d,%d)"%(G[u][v]['weight'], u, v)
         
-        pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [1.0, -0.5], 3: [2.0, 0.0], 4: [2.0,  -1.0]}
-        # pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [0.0, -2.0], 3: [1.0, -0.5], 4: [2.0,  0.0], 5: [2.0, -1.0], 6: [2.0, -2.0]}
-        # pos = nx.spring_layout(G, weight='weight')
+        pos = self.__make_pos()
 
         suppliers = [i for i in range(self.S)]
         warehouses = [i for i in range(self.S, self.S + self.W)]
         distributors = [i for i in range(self.S + self.W, self.S + self.W + self.D)]
 
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=1000, node_color='C0')
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=1000, node_color='C1')
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=1000, node_color='C2')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=1000, node_color='C0', node_shape='s')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=1000, node_color='C1', node_shape='p')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=1000, node_color='C2', node_shape='o')
 
         nx.draw_networkx_edges(G, pos=pos, node_color='C0', width=width)
         nx.draw_networkx_labels(G, pos=pos)
@@ -368,18 +366,15 @@ class HendriksArmbrusterSimulator:
             node_labels[j] = "[%3.1f]\n%4.2f\n%4.2f"%(self.D_t.at[self.t][j-self.S-self.W], 
                 self.b_t.at[self.t-1][j-self.S-self.W], self.b_t.at[self.t][j-self.S-self.W])
 
-        # pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [1.0, -0.5], 3: [2.0, 0.0], 4: [2.0,  -1.0]}
-        # pos = {0: [0.0,  0.0], 1: [1.0, 0.50], 2: [2.0, 0.0]}
-        pos = {0: [0.0,  0.0], 1: [0.0, -1.0], 2: [0.0, -2.0], 3: [1.0, -0.5], 4: [2.0,  0.0], 5: [2.0, -1.0], 6: [2.0, -2.0]}
-        # pos = nx.spring_layout(G, weight='weight')
+        pos = self.__make_pos()
 
         suppliers = [i for i in range(self.S)]
         warehouses = [i for i in range(self.S, self.S + self.W)]
         distributors = [i for i in range(self.S + self.W, self.S + self.W + self.D)]
 
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=2000, node_color='C0')
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=2000, node_color='C1')
-        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=2000, node_color='C2')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=suppliers,    node_size=2000, node_color='C0', node_shape='s')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=warehouses,   node_size=2000, node_color='C1', node_shape='p')
+        nx.draw_networkx_nodes(G, pos=pos, nodelist=distributors, node_size=2000, node_color='C2', node_shape='o')
 
         nx.draw_networkx_edges(G, pos=pos, node_color='C0', width=width)
         nx.draw_networkx_labels(G, pos=pos, labels=node_labels)
@@ -387,6 +382,39 @@ class HendriksArmbrusterSimulator:
         plt.axis('off')
         plt.show()
             
+
+    def __make_pos(self):
+        swd = [self.S, self.W, self.D]
+        n_max = max(swd)
+        l_max = n_max - 1
+        pos = {}
+        k = 0
+        x = 0.
+        for j in range(3):
+            n = swd[j]
+            h_shift = 0.
+            
+            if n <= n_max-2:
+                h_x = l_max / (n + 1)
+                h_shift = h_x 
+
+            elif n == n_max-1:
+                h_x = l_max / n
+                h_shift = 0.5
+            else:
+                h_x = l_max / (n - 1)
+            if j == 1:
+                h_shift -= h_x / 3
+
+            for i in range(n):
+                pos[k] = [x, l_max / 2 - h_shift - h_x*i]
+                k += 1
+            x += 1.
+        return pos
+
+        
+
+
 
 np.random.seed(1)
 A = HendriksArmbrusterSimulator()
