@@ -1,4 +1,6 @@
 # HA supply network model
+Based on the article "Design of robust distribution networks run by third party logistics service provider"
+
 The current version of the model is simplified in the following ways:
   - only single product considered (K == 1)
 
